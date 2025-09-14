@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>🔮 Wingo Prediction Tool</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #0d0d0d;
+  color: #fff;
+  text-align: center;
+  margin: 0;
+  padding: 20px;
+}
+h1 { color: #00eaff; }
+.card {
+  background: #1a1a1a;
+  padding: 20px;
+  border-radius: 12px;
+  margin: 20px auto;
+  width: 480px;
+  box-shadow: 0 0 15px rgba(0, 234, 255, 0.4);
+  text-align: left;
+}
+.history-box { font-size: 14px; margin: 4px 0; padding: 4px; border-bottom: 1px solid #333; }
+
+/* Animation */
+@keyframes fadeSlideIn {
+  0% { opacity: 0; transform: translateY(-10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate {
+  animation: fadeSlideIn 0.5s ease forwards;
+}
+
+.prediction { 
+  margin-top: 10px; 
+  font-weight: bold; 
+  color: #fff; 
+  line-height: 1.6; 
+  word-break: break-word; 
+}
+
+/* Gradient Buttons */
+.mode-btn {
+  padding: 10px 25px;
+  margin: 5px;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: bold;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.2s ease-in-out;
+}
+.mode-btn:hover { transform: scale(1.05); }
+.btn-30s { background: linear-gradient(45deg, #ff416c, #ff4b2b); }
+.btn-1m { background: linear-gradient(45deg, #36d1dc, #5b86e5); }
+
+/* Tag styles */
+.tag {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: bold;
+  margin: 0 4px;
+  color: #000;
+}
+.tag-big { background: #ffeb3b; }
+.tag-small { background: #03a9f4; color: #fff; }
+.tag-red { background: #f44336; color: #fff; }
+.tag-green { background: #4caf50; color: #fff; }
+.tag-violet { background: #e040fb; color: #fff; }
+
+#timer { font-size: 18px; color: #ffcc00; margin-top: 10px; text-align: center; }
+#fullHistory30s, #fullHistory1m { max-height: 250px; overflow-y: auto; background: #111; padding: 10px; border-radius: 8px; margin-top: 10px; text-align: left; font-size: 13px; display: none; }
+#history { display: none; }
+#matchResult { color:#ff0; font-weight:bold; margin-top:10px; }
+
+</style>
+</head>
+<body>
+
+<h1>🔮 Wingo Prediction Tool</h1>
+
+<!-- Mode Buttons -->
+<div>
+  <button class="mode-btn btn-30s" onclick="setMode('30s')">Wingo 30 Sec</button>
+  <button class="mode-btn btn-1m" onclick="setMode('1m')">Wingo 1 Min</button>
+</div>
+
+<div class="card">
+  <h2>Manual Check (Enter last 4–5 digits)</h2>
+  <input type="text" id="manualNum" placeholder="Enter 4–5 digits" 
+    style="width:200px; text-align:center; font-size:16px;">
+  <br><br>
+  <button onclick="manualPredict()">Predict</button>
+  <div id="manualPrediction" class="prediction">--</div>
+  <div id="matchResult"></div>
+</div>
+
+<div id="timer">⏳ Loading...</div>
+
+<div class="card">
+  <h2>Latest Results <button onclick="toggleHistory('recent')">Show/Hide</button></h2>
+  <div id="history">Loading...</div>
+
+  <h2>Next Prediction</h2>
+  <div id="prediction" class="prediction">Wait...</div>
+</div>
+
+<h2>📜 Full History</h2>
+<button onclick="toggleHistory('30s')">Show/Hide 30s History</button>
+<div id="fullHistory30s">Loading...</div>
+<br>
+<button onclick="toggleHistory('1m')">Show/Hide 1m History</button>
+<div id="fullHistory1m">Loading...</div>
+
+<script>
+const API_CANDIDATES = {
+  '30s': ['https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json?ts='],
+  '1m':  ['https://draw.ar-lottery01.com/WinGo/WinGo_1M/GetHistoryIssuePage.json?ts=']
+};
+
+let countdown = 30, timerInterval;
+let historyData30s = JSON.parse(localStorage.getItem("wingoHistory30s")) || [];
+let historyData1m  = JSON.parse(localStorage.getItem("wingoHistory1m")) || [];
+let currentMode = "30s";
+
+/* Color Mapping */
+function getColor(num){
+  switch(num){
+    case 0: return ["Red","Violet"];
+    case 1: return ["Green"];
+    case 2: return ["Red"];
+    case 3: return ["Green"];
+    case 4: return ["Red"];
+    case 5: return ["Green","Violet"];
+    case 6: return ["Red"];
+    case 7: return ["Green"];
+    case 8: return ["Red"];
+    case 9: return ["Green"];
+    default: return [];
+  }
+}
+
+/* Format tags */
+function formatPrediction(num){
+  let tags=[];
+  tags.push(num>=5?`<span class="tag tag-big">BIG</span>`:`<span class="tag tag-small">SMALL</span>`);
+  getColor(num).forEach(c=>{
+    if(c==="Red") tags.push(`<span class="tag tag-red">RED</span>`);
+    if(c==="Green") tags.push(`<span class="tag tag-green">GREEN</span>`);
+    if(c==="Violet") tags.push(`<span class="tag tag-violet">VIOLET</span>`);
+  });
+  return `${tags.join(" ")} <b>${num}</b>`;
+}
+
+/* Weighted Prediction */
+function predictNext(historyNums){
+  if(!historyNums.length) return "No Data";
+  let counts=Array(10).fill(0);
+  historyNums.forEach(n=>{ counts[parseInt(n)]++; });
+  let total=historyNums.length;
+  let prediction=counts.map((c,i)=>({num:i,weight:(c/total*100).toFixed(1)}));
+  prediction.sort((a,b)=>b.weight-a.weight);
+  let top=prediction[0];
+  return formatPrediction(top.num) + ` (${top.weight}%)`;
+}
+
+/* Manual Predict with Animation */
+function manualPredict(){
+  let val=document.getElementById("manualNum").value.trim();
+  if(!val||val.length<4){ alert("Enter at least 4 digits."); return; }
+
+  let combinedHistory=[...historyData30s,...historyData1m];
+  let combinedNums=combinedHistory.map(h=>parseInt(h.number));
+  let userNums=val.split("").map(n=>parseInt(n));
+  let userPredict=predictNext(userNums);
+  let historyPredict=predictNext(combinedNums);
+
+  let manualDiv=document.getElementById("manualPrediction");
+  manualDiv.classList.remove("animate");
+  void manualDiv.offsetWidth; 
+  manualDiv.classList.add("animate");
+  manualDiv.innerHTML=`live - ${userPredict}<br>Analyzes → ${historyPredict}`;
+
+  let last4=val.slice(-4);
+  let found=combinedHistory.find(h=>h.issueNumber.endsWith(last4));
+  let matchDiv=document.getElementById("matchResult");
+  matchDiv.classList.remove("animate");
+  void matchDiv.offsetWidth;
+  matchDiv.classList.add("animate");
+
+  if(found){
+    let num=parseInt(found.number);
+    matchDiv.innerHTML=`✔️ Match Found!<br>Issue: ${found.issueNumber}<br>${formatPrediction(num)}`;
+  } else {
+    matchDiv.innerText="❌ No match found in combined history.";
+  }
+}
+
+/* Fetch */
+async function fetchResults(mode){
+  let url=API_CANDIDATES[mode][0]+Date.now();
+  try{
+    let res=await fetch(url);
+    let data=await res.json();
+    return data?.data?.list || [];
+  }catch(e){ console.error(e); return []; }
+}
+
+/* Update */
+async function update(){
+  let history=await fetchResults(currentMode);
+  if(currentMode==="30s"){
+    history.forEach(h=>{ if(!historyData30s.find(x=>x.issueNumber===h.issueNumber)) historyData30s.unshift(h); });
+    if(historyData30s.length>1000) historyData30s=historyData30s.slice(0,1000);
+    localStorage.setItem("wingoHistory30s",JSON.stringify(historyData30s));
+    document.getElementById("fullHistory30s").innerHTML=historyData30s.map(h=>`#${h.issueNumber} → ${formatPrediction(parseInt(h.number))}`).join("<br>");
+  } else {
+    history.forEach(h=>{ if(!historyData1m.find(x=>x.issueNumber===h.issueNumber)) historyData1m.unshift(h); });
+    if(historyData1m.length>1000) historyData1m=historyData1m.slice(0,1000);
+    localStorage.setItem("wingoHistory1m",JSON.stringify(historyData1m));
+    document.getElementById("fullHistory1m").innerHTML=historyData1m.map(h=>`#${h.issueNumber} → ${formatPrediction(parseInt(h.number))}`).join("<br>");
+  }
+  document.getElementById("history").innerHTML=history.slice(0,5).map(h=>`<div class="history-box">#${h.issueNumber} → ${formatPrediction(parseInt(h.number))}</div>`).join("");
+  let nums=history.map(h=>parseInt(h.number));
+  document.getElementById("prediction").innerHTML=predictNext(nums);
+}
+
+/* Timer */
+function resetTimer(){
+  clearInterval(timerInterval);
+  countdown=(currentMode==="30s")?30:60;
+  update();
+  document.getElementById("timer").innerText=`⏳ Next round in: ${countdown}s`;
+  timerInterval=setInterval(()=>{
+    countdown--;
+    if(countdown<=0){ update(); resetTimer(); }
+    document.getElementById("timer").innerText=`⏳ Next round in: ${countdown}s`;
+  },1000);
+}
+function setMode(mode){ currentMode=mode; resetTimer(); }
+function toggleHistory(type){
+  if(type==='recent'){ let div=document.getElementById('history'); div.style.display=(div.style.display==='none')?'block':'none'; }
+  if(type==='30s'){ let div=document.getElementById('fullHistory30s'); div.style.display=(div.style.display==='none')?'block':'none'; }
+  if(type==='1m'){ let div=document.getElementById('fullHistory1m'); div.style.display=(div.style.display==='none')?'block':'none'; }
+}
+
+setMode("30s");
+</script>
+</body>
+</html>
